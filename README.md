@@ -1,0 +1,2 @@
+# -.konbiniVAI
+Konbini Vtuber Girl
