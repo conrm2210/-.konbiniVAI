@@ -1,0 +1,9 @@
+openai
+pydub
+argparse
+speech_recognition
+whisper
+click
+torch
+numpy
+pyaudio
