@@ -1,0 +1,205 @@
+import openai
+import json
+from pytchat import LiveChat, SpeedCalculator
+import time
+import requests
+from pydub import AudioSegment
+from pydub.playback import play
+import io
+import sys
+import argparse
+from pydub import AudioSegment
+import speech_recognition as sr
+import whisper
+import queue
+import tempfile
+import os
+import threading
+import click
+import torch
+import numpy as np
+import pyaudio
+import urllib.parse
+import os
+import torch
+import requests
+import urllib.parse
+from katakana import *
+import wave
+from pydub.utils import make_chunks
+
+
+def initVar():
+    global OAI_key
+    global OAI
+    try:
+        with open("config.json") as json_file:
+            data = json.load(json_file)
+    except:
+        print("Unable to open JSON file.")
+        exit()
+
+    class OAI:
+        key = data["keys"][0]["OAI_key"]
+        model = data["OAI_data"][0]["model"]
+        prompt = data["OAI_data"][0]["prompt"]
+        temperature = data["OAI_data"][0]["temperature"]
+        max_tokens = data["OAI_data"][0]["max_tokens"]
+        top_p = data["OAI_data"][0]["top_p"]
+        frequency_penalty = data["OAI_data"][0]["frequency_penalty"]
+        presence_penalty = data["OAI_data"][0]["presence_penalty"]
+
+
+
+def voicevox_tts(tts):
+    # You need to run VoicevoxEngine.exe first before running this script
+    voicevox_url = 'http://localhost:50021'
+    # Convert the text to katakana. Example: ORANGE -> オレンジ, so the voice will sound more natural
+    # You can change the voice to your liking. You can find the list of voices on speaker.json
+    # or check the website https://voicevox.hiroshiba.jp
+    params_encoded = urllib.parse.urlencode({'text': tts, 'speaker': 20, 'speedScale': 3, 'intonationScale' : 3})
+    request = requests.post(f'{voicevox_url}/audio_query?{params_encoded}')
+    params_encoded = urllib.parse.urlencode({'speaker': 20, 'enable_interrogative_upspeak': True, 'speedScale': 3, 'intonationScale' : 3})
+    request = requests.post(f'{voicevox_url}/synthesis?{params_encoded}', json=request.json())
+
+    with open("test.wav", "wb") as outfile:
+        outfile.write(request.content)
+
+    # Load the audio content from the request
+    audio_content = AudioSegment.from_file(io.BytesIO(request.content), format="wav")
+
+    # Define the sample rate and channels of the audio stream
+    sample_rate = 44100
+    channels = 2
+
+    # Define the audio device ID of the target audio source
+    device_id = 39 # Replace with the ID of your target audio source
+
+    # Create a PyAudio object
+    p = pyaudio.PyAudio()
+
+    # Open an audio stream with the target audio source
+    stream = p.open(format=pyaudio.paInt16,
+        channels=channels,
+        rate=sample_rate,
+        output=True,
+        output_device_index=device_id)
+    
+
+    # Resample the audio file to match the sample rate of the audio stream
+    if audio_content.frame_rate != sample_rate:
+        audio_content = audio_content.set_frame_rate(int(sample_rate*2))
+
+    # Play the audio content through the target audio source
+    chunk_length_ms = 100
+    for chunk in make_chunks(audio_content, chunk_length_ms):
+        chunk_data = chunk.raw_data
+        stream.write(chunk_data)
+
+
+    # Close the stream (5)
+    stream.close()
+
+    # Release PortAudio system resources (6)
+    p.terminate()
+
+    # Delete the audio file
+    os.remove("test.wav")
+
+   
+
+
+@click.command()
+@click.option("--model", default="base", help="Model to use", type=click.Choice(["tiny","base", "small","medium","large"]))
+@click.option("--japanese", default=True, help="Whether to use Japanese model", is_flag=True, type=bool)
+@click.option("--verbose", default=False, help="Whether to print verbose output", is_flag=True,type=bool)
+@click.option("--energy", default=300, help="Energy level for mic to detect", type=int)
+@click.option("--dynamic_energy", default=False,is_flag=True, help="Flag to enable dynamic engergy", type=bool)
+@click.option("--pause", default=0.8, help="Pause time before entry ends", type=float)
+@click.option("--save_file",default=False, help="Flag to save file", is_flag=True,type=bool)
+
+def main(model, japanese,verbose, energy, pause,dynamic_energy,save_file):
+    temp_dir = tempfile.mkdtemp() if save_file else None
+    # there are no Japanese models for large
+    audio_model = whisper.load_model(model)
+    audio_queue = queue.Queue()
+    result_queue = queue.Queue()
+    threading.Thread(target=record_audio,
+                    args=(audio_queue, energy, pause, dynamic_energy, save_file, temp_dir)).start()
+    threading.Thread(target=transcribe_forever,
+                    args=(audio_queue, result_queue, audio_model, japanese, verbose, save_file)).start()
+
+    while True:
+        print(result_queue.get())
+
+def record_audio(audio_queue, energy, pause, dynamic_energy, save_file, temp_dir):
+    #load the speech recognizer and set the initial energy threshold and pause threshold
+    r = sr.Recognizer()
+    r.energy_threshold = energy
+    r.pause_threshold = pause
+    r.dynamic_energy_threshold = dynamic_energy
+
+    with sr.Microphone(sample_rate=16000) as source:
+        print("Say something!")
+        i = 0
+        while True:
+            #get and save audio to wav file
+            audio = r.listen(source)
+            if save_file:
+                data = io.BytesIO(audio.get_wav_data())
+                audio_clip = AudioSegment.from_file(data)
+                filename = os.path.join(temp_dir, f"temp{i}.wav")
+                audio_clip.export(filename, format="wav")
+                audio_data = filename
+            else:
+                torch_audio = torch.from_numpy(np.frombuffer(audio.get_raw_data(), np.int16).flatten().astype(np.float32) / 32768.0)
+                audio_data = torch_audio
+
+            audio_queue.put_nowait(audio_data)
+            i += 1
+
+
+def transcribe_forever(audio_queue, result_queue, audio_model, japanese, verbose, save_file):
+    while True:
+        audio_data = audio_queue.get()
+        if japanese:
+            result = audio_model.transcribe(audio_data,language='ja', fp16=False)
+        else:
+            result = audio_model.transcribe(audio_data, fp16=False)
+        if not verbose:
+            predicted_text = result["text"]
+            response = llm(predicted_text)
+            print(response)
+            result_queue.put_nowait("You said: " + predicted_text)
+            voicevox_tts(response)
+
+        else:
+            result_queue.put_nowait(result)
+
+        if save_file:
+            os.remove("test.wav")
+   
+
+
+def llm(message):
+
+    openai.api_key = OAI.key
+    start_sequence = " #########"
+    response = openai.Completion.create(
+      model= OAI.model,
+      prompt= OAI.prompt + "\n\n#########\n" + message + "\n#########\n",
+      temperature = OAI.temperature,
+      max_tokens = OAI.max_tokens,
+      top_p = OAI.top_p,
+      frequency_penalty = OAI.frequency_penalty,
+      presence_penalty = OAI.presence_penalty
+    )
+
+    json_object = json.loads(str(response))
+    return(json_object['choices'][0]['text'])
+
+
+if __name__ == "__main__":
+    initVar()
+    print("\n\Running!\n\n")
+    main()
