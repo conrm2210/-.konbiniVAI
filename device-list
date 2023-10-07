@@ -1,0 +1,10 @@
+import pyaudio
+
+# Create a PyAudio object
+pa = pyaudio.PyAudio()
+
+# Iterate over all recording devices and print their information
+for i in range(pa.get_device_count()):
+    device_info = pa.get_device_info_by_index(i)
+    if device_info['maxOutputChannels'] > 0:
+        print("Device index:", i, "- Name:", device_info['name'])
