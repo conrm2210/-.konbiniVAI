@@ -1,0 +1,53 @@
+"""import MeCab
+import unidic_lite
+import pandas as pd
+import alkana
+import re
+import sys
+
+sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf8', buffering=1)
+
+alphaReg = re.compile(r'^[a-zA-Z]+$')
+def isalpha(s):
+    return alphaReg.match(s) is not None
+
+def katakana_converter(text):
+    wakati = MeCab.Tagger('-Owakati')
+    wakati_result = wakati.parse(text)
+
+    df = pd.DataFrame(wakati_result.split(" "),columns=["word"])
+    df = df[df["word"].str.isalpha() == True]
+    df["english_word"] = df["word"].apply(isalpha)
+    df = df[df["english_word"] == True]
+    df["katakana"] = df["word"].apply(alkana.get_kana)
+
+    dict_rep = dict(zip(df["word"], df["katakana"]))
+
+    for word, read in dict_rep.items():
+        try:
+            text = text.replace(word, read)
+        except:
+            pass
+    return text"""
+
+# 英語→カタカナ変換機(https://www.sljfaq.org/cgi/e2k_ja.cgi)からスクレイピング
+import urllib
+import urllib.request as request
+from bs4 import BeautifulSoup
+
+import unicodedata
+
+
+def english_to_katakana(word):
+    word = word.replace(" ","-")
+    url = 'https://www.sljfaq.org/cgi/e2k_ja.cgi'
+    url_q = url + '?word=' + word
+    headers = {'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:47.0) Gecko/20100101 Firefox/47.0'}
+
+    request = urllib.request.Request(url_q, headers=headers)
+    html = urllib.request.urlopen(request)
+    soup = BeautifulSoup(html, 'html.parser')
+    katakana_string = soup.find_all(class_='katakana-string')[0].string.replace('\
+', '')
+
+    return katakana_string
