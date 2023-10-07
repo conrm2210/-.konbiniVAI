@@ -1,0 +1,19 @@
+{
+    "keys": [
+        {
+            "OAI_key": "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"
+        }
+    ],
+    "OAI_data": [
+        {
+          "model": "text-davinci-003",
+          "prompt": "This is how a silly, and loving japanese highschool girl would talk casually to her friend named コン",
+          "temperature": 0.9,
+            "max_tokens": 96,
+            "top_p": 1,
+            "frequency_penalty": 1,
+            "presence_penalty": 1
+        }
+
+    ]
+}
